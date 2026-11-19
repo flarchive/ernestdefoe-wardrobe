@@ -1,0 +1,62 @@
+<?php
+
+/*
+ * Wardrobe — several themes installed, one chosen per member.
+ */
+
+use Ernestdefoe\Wardrobe\ApplyTheme;
+use Ernestdefoe\Wardrobe\InvalidateThemeAssets;
+use Ernestdefoe\Wardrobe\ThemeRegistry;
+use Flarum\Extend;
+use Flarum\Frontend\Event\AssetsRecompiled;
+
+return [
+    (new Extend\Frontend('forum'))
+        ->js(__DIR__.'/js/dist/forum.js')
+        ->css(__DIR__.'/less/forum.less')
+        // Priority 0, so this runs after core's Content\Assets (190) has
+        // already put the shared forum.css URL into the document.
+        ->content(ApplyTheme::class),
+
+    (new Extend\Frontend('admin'))
+        ->js(__DIR__.'/js/dist/admin.js')
+        ->css(__DIR__.'/less/admin.less'),
+
+    new Extend\Locales(__DIR__.'/locale'),
+
+    /*
+     * The member's own choice.
+     *
+     * 🚨 The transformer is what keeps this honest: a preference is written
+     * from the client, so without it a member could store any string at all.
+     * `validPreference()` keeps '' (which means "follow the forum") and turns
+     * anything that is not a configured theme into '' as well — so a
+     * hand-written API call cannot park someone on a theme the owner has not
+     * offered.
+     *
+     * `resolve()` is deliberate: `registerPreference()` takes a plain callable
+     * and extend.php has no container, so the closure looks the registry up
+     * lazily, when a preference is actually written.
+     *
+     * The key is a literal (ThemeRegistry::PREFERENCE) because reading a class
+     * constant here would autoload the class while extend.php loads, which
+     * fatals every request during a deploy that is still updating composer.
+     */
+    (new Extend\User())
+        ->registerPreference(
+            'wardrobeTheme',
+            fn ($value) => resolve(ThemeRegistry::class)->validPreference($value),
+            ''
+        ),
+
+    // Unset means: members may choose, and plain Flarum is not offered.
+    // Literal keys for the same autoload reason as above (ThemeRegistry::ALLOW_USER_CHOICE, ::OFFER_FLARUM).
+    (new Extend\Settings())
+        ->default('wardrobe.allow_user_choice', '1')
+        ->default('wardrobe.offer_flarum', '0'),
+
+    // Core only rebuilds the asset sets it knows about, so the theme
+    // stylesheets must be marked stale whenever the shared one is rebuilt.
+    (new Extend\Event())
+        ->listen(AssetsRecompiled::class, InvalidateThemeAssets::class),
+];
